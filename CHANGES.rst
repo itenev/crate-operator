@@ -5,6 +5,11 @@ Changelog
 Unreleased
 ----------
 
+* Local patch for upstream issue #918: added opt-in ``clusterip`` exposure for
+  new database clusters, including Service recreation and suspend/start.
+  Transitions to/from this mode and enabled Grand Central in this mode are
+  explicitly unsupported. Existing exposure defaults are unchanged.
+
 2.63.0 (2026-08-12)
 -------------------
 

@@ -38,6 +38,7 @@ from crate.operator.create import (
     CreateSystemUserSubHandler,
     build_cratedb_labels,
     get_owner_references,
+    validate_cluster_exposure,
 )
 from crate.operator.exposure import CreateTraefikResourcesSubHandler
 from crate.operator.operations import (
@@ -56,6 +57,7 @@ async def create_cratedb(
     status: kopf.Status,
     logger: logging.Logger,
 ):
+    validate_cluster_exposure(spec)
     context = status.get(CLUSTER_CREATE_ID) or {}
     hash = hashlib.md5(str(spec).encode("utf-8")).hexdigest()
     name = meta["name"]

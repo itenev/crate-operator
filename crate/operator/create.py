@@ -1331,6 +1331,27 @@ def _lb_annotations_to_remove() -> dict:
     }
 
 
+def validate_cluster_exposure(spec: Dict[str, Any]) -> None:
+    cluster = spec.get("cluster", {})
+    exposure = cluster.get("exposure", "loadbalancer")
+    if exposure not in {"loadbalancer", "traefik", "clusterip"}:
+        raise kopf.PermanentError(f"Unsupported cluster exposure: {exposure!r}")
+    if exposure != "clusterip":
+        return
+    annotations = cluster.get("service", {}).get("annotations", {})
+    if cluster.get("externalDNS") or any(
+        key.startswith("external-dns.") or "load-balancer" in key for key in annotations
+    ):
+        raise kopf.PermanentError(
+            "clusterip exposure does not support externalDNS or "
+            "load-balancer/external-DNS Service annotations."
+        )
+    if (spec.get("grandCentral") or {}).get("backendEnabled"):
+        raise kopf.PermanentError(
+            "clusterip exposure does not support enabled Grand Central."
+        )
+
+
 def get_data_service(
     owner_references: Optional[List[V1OwnerReference]],
     name: str,
@@ -1340,18 +1361,18 @@ def get_data_service(
     dns_record: Optional[str],
     source_ranges: Optional[List[str]] = None,
     additional_annotations: Optional[Dict] = None,
-    use_traefik: bool = False,
+    exposure: str = "loadbalancer",
     has_dedicated_masters: bool = False,
 ) -> V1Service:
     res_annotations = {}
 
-    if not use_traefik:
+    if exposure == "loadbalancer":
         res_annotations.update(_lb_annotations_to_add(dns_record))
 
     if additional_annotations:
         res_annotations.update(additional_annotations)
 
-    service_type = "ClusterIP" if use_traefik else "LoadBalancer"
+    service_type = "LoadBalancer" if exposure == "loadbalancer" else "ClusterIP"
 
     selector = {LABEL_COMPONENT: "cratedb", LABEL_NAME: name}
     if has_dedicated_masters:
@@ -1372,7 +1393,7 @@ def get_data_service(
         type=service_type,
     )
 
-    if not use_traefik:
+    if exposure == "loadbalancer":
         spec_kwargs["external_traffic_policy"] = "Local"
         if source_ranges:
             spec_kwargs["load_balancer_source_ranges"] = source_ranges
@@ -1467,13 +1488,13 @@ async def create_services(
     logger: logging.Logger,
     source_ranges: Optional[List[str]] = None,
     additional_annotations: Optional[Dict] = None,
-    use_traefik: bool = False,
+    exposure: str = "loadbalancer",
     has_dedicated_masters: bool = False,
 ) -> None:
     async with GlobalApiClient() as api_client:
         core = CoreV1Api(api_client)
 
-        # Create the load balancer service
+        # Create the client service.
         svc = get_data_service(
             owner_references,
             name,
@@ -1483,7 +1504,7 @@ async def create_services(
             dns_record,
             source_ranges,
             additional_annotations=additional_annotations,
-            use_traefik=use_traefik,
+            exposure=exposure,
             has_dedicated_masters=has_dedicated_masters,
         )
         await call_kubeapi(
@@ -1524,6 +1545,7 @@ async def recreate_services(
     meta,
     logger: logging.Logger,
 ):
+    validate_cluster_exposure(spec)
     ports_spec = spec.get("ports", {})
     http_port = ports_spec.get("http", Port.HTTP.value)
     postgres_port = ports_spec.get("postgres", Port.POSTGRES.value)
@@ -1538,7 +1560,6 @@ async def recreate_services(
     dns_record = spec.get("cluster", {}).get("externalDNS", None)
 
     exposure = spec.get("cluster", {}).get("exposure", "loadbalancer")
-    use_traefik = exposure == "traefik"
 
     await create_services(
         owner_references,
@@ -1552,7 +1573,7 @@ async def recreate_services(
         logger,
         source_ranges,
         additional_annotations,
-        use_traefik=use_traefik,
+        exposure=exposure,
         has_dedicated_masters="master" in spec["nodes"],
     )
 
@@ -1788,7 +1809,6 @@ class CreateServicesSubHandler(StateBasedSubHandler):
         has_dedicated_masters: bool = False,
         **kwargs: Any,
     ):
-        use_traefik = exposure == "traefik"
         await create_services(
             owner_references,
             namespace,
@@ -1801,7 +1821,7 @@ class CreateServicesSubHandler(StateBasedSubHandler):
             logger,
             source_ranges,
             additional_annotations,
-            use_traefik=use_traefik,
+            exposure=exposure,
             has_dedicated_masters=has_dedicated_masters,
         )
 

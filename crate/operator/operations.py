@@ -1217,7 +1217,7 @@ async def suspend_or_start_cluster(
                     await recreate_services(
                         namespace, name, cratedb["spec"], cratedb["metadata"], logger
                     )
-                if not use_traefik and not await is_lb_service_ready(
+                if exposure == "loadbalancer" and not await is_lb_service_ready(
                     core, namespace, name
                 ):
                     raise TemporaryError(delay=config.BOOTSTRAP_RETRY_DELAY)
@@ -1353,6 +1353,8 @@ async def suspend_or_start_cluster(
                 # Delete Traefik resources (IngressRouteTCPs and MiddlewareTCP)
                 await delete_traefik_resources(namespace, name)
                 # Also delete the ClusterIP service
+                await delete_clusterip_service(core, namespace, name)
+            elif exposure == "clusterip":
                 await delete_clusterip_service(core, namespace, name)
             else:
                 # Delete the LoadBalancer service

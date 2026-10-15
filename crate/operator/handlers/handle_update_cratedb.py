@@ -32,6 +32,7 @@ from crate.operator.change_compute import (
 )
 from crate.operator.config import config
 from crate.operator.constants import CLUSTER_UPDATE_ID, OperationType
+from crate.operator.create import validate_cluster_exposure
 from crate.operator.expand_volume import ExpandVolumeSubHandler
 from crate.operator.exposure import (
     ChangeExposureSubHandler,
@@ -124,6 +125,21 @@ async def update_cratedb(
     This helps avoid duplicate hashes for situations when the same op is
     performed repeatedly, i.e. suspend/resume/suspend/resume/...
     """
+    validate_cluster_exposure(body["spec"])
+    for _, field_path, old_value, new_value in diff:
+        if field_path == ("spec", "cluster", "exposure"):
+            old_exposure = old_value or "loadbalancer"
+            new_exposure = new_value or "loadbalancer"
+            if old_exposure != new_exposure and "clusterip" in {
+                old_exposure,
+                new_exposure,
+            }:
+                raise kopf.PermanentError(
+                    "Transitions to or from clusterip are not supported by this "
+                    "patch. Restore the previous spec.cluster.exposure value; "
+                    "use clusterip only for newly created clusters."
+                )
+
     context = status.get(CLUSTER_UPDATE_ID)
     hash_string = str(diff) + str(started)
     change_hash = hashlib.md5(hash_string.encode("utf-8")).hexdigest()

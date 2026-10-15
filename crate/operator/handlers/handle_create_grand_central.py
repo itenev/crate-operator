@@ -24,6 +24,7 @@ import logging
 import kopf
 
 from crate.operator.config import config
+from crate.operator.create import validate_cluster_exposure
 from crate.operator.grand_central import (
     create_grand_central_backend,
     create_grand_central_user,
@@ -46,6 +47,7 @@ async def create_grand_central(
         new is not None and new.get("backendEnabled")
     ):
         cratedb = await get_cratedb_resource(namespace, name)
+        validate_cluster_exposure(cratedb["spec"])
         use_traefik = grand_central_uses_traefik(cratedb["spec"])
         kopf.register(
             fn=subhandler_partial(

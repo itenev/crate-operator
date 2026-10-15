@@ -1,6 +1,52 @@
 Configuration
 =============
 
+Internal-only database exposure (local patch)
+--------------------------------------------
+
+This local patch to operator 2.63.0 implements the creation-only scope of
+`upstream issue #918 <https://github.com/crate/crate-operator/issues/918>`_.
+It is not an upstream release feature.
+
+For a new CrateDB resource, set:
+
+.. code-block:: yaml
+
+   spec:
+     cluster:
+       exposure: clusterip
+
+Install the matching patched CRD and operator before creating such a resource.
+The ordinary client Service exposes HTTP and PostgreSQL within Kubernetes, and
+the headless discovery Service remains available. The operator creates no cloud
+load balancer, Traefik routes, routing middleware or external-DNS annotations for
+this mode. It does not require Traefik CRDs or an external hostname.
+
+Omitting exposure still selects ``loadbalancer``. Existing ``loadbalancer`` and
+``traefik`` behavior is unchanged. Internal-only Service recreation and
+suspend/start retain the selected mode without waiting for an LB address.
+ClusterIP is not an authorization boundary: use database authentication and
+the platform's network policies to restrict in-cluster clients. ``allowedCIDRs``
+does not restrict ClusterIP traffic.
+
+This first patch does not support transitions to/from ``clusterip``. Such an
+update fails explicitly before exposure changes; it does not revert the stored
+resource specification. Restore the previous exposure value before further
+operations. Existing load balancers must not be migrated by this patch or by
+removing their cleanup finalizers.
+
+Enabled Grand Central, ``externalDNS`` and external-DNS/load-balancer Service
+annotations are rejected with ``clusterip``. Do not use this mode with Grand
+Central or add external routing through Service annotations. Enabling Grand
+Central later is also rejected. Disabled or absent Grand Central is supported.
+
+Run the operator inside Kubernetes for internal-only integration tests.
+The upstream external test-runner connection mode assumes an external endpoint;
+it cannot reach a ClusterIP from outside the cluster.
+
+Operator environment variables
+------------------------------
+
 The configuration for the CrateDB Kubernetes Operator follows the `12 Factor
 Principles`_ and uses environment variables. All environment variables are
 expected to use upper case letters and must be prefixed with
