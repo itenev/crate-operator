@@ -21,6 +21,72 @@ dependencies for local development.
    $ source env/bin/activate
    (env)$ python -m pip install -e .
 
+Local patched image (Hive)
+--------------------------
+
+For a local candidate based on the reviewed 2.63.0 patch, use Python package
+version ``2.63.0+hive.1`` and image tag ``2.63.0-hive.1``. The version override
+is required for a linked worktree: its ``.git`` pointer does not resolve inside
+the Docker build context. Normal upstream builds may omit this override and
+continue to derive the version from their full Git checkout.
+
+Resolve and record the base digest before building:
+
+.. code-block:: console
+
+   $ docker buildx imagetools inspect python:3.12-slim
+   $ export PYTHON_IMAGE=python:3.12-slim@sha256:<resolved-index-digest>
+
+Stage the reviewed build changes first. The patch checksum covers the complete
+tracked and newly staged diff against HEAD, not arbitrary untracked files.
+Check ``git status --short`` and keep unrelated files out of the build context.
+For this uncommitted candidate:
+
+.. code-block:: console
+
+   $ export SOURCE_REVISION=$(git rev-parse HEAD)
+   $ export SOURCE_PATCH_SHA256=$(git diff HEAD --binary | sha256sum | cut -d' ' -f1)
+   $ docker build --platform linux/amd64 --progress plain \
+       --build-arg PYTHON_IMAGE="$PYTHON_IMAGE" \
+       --build-arg OPERATOR_VERSION=2.63.0+hive.1 \
+       --build-arg SOURCE_URL=https://github.com/itenev/crate-operator \
+       --build-arg SOURCE_REVISION="$SOURCE_REVISION" \
+       --build-arg SOURCE_STATE=dirty \
+       --build-arg SOURCE_PATCH_SHA256="$SOURCE_PATCH_SHA256" \
+       -t hive/crate-operator:2.63.0-hive.1 .
+
+If Docker bridge DNS is unavailable locally, diagnose that separately and use
+``--network=host`` for this build only; do not change runtime networking or
+mount credentials/kubeconfig. This flag is a local workaround, not required by
+the image.
+
+Using the development virtual environment with ``.[testing]`` installed:
+
+.. code-block:: console
+
+   $ CRATE_OPERATOR_TEST_IMAGE=hive/crate-operator:2.63.0-hive.1 \
+       python -m pytest tests/test_local_image_build.py -q
+   $ python -m pytest -q
+   $ pre-commit run
+   $ docker image inspect hive/crate-operator:2.63.0-hive.1
+   $ docker run --rm --network=none --entrypoint python \
+       hive/crate-operator:2.63.0-hive.1 -m pip list --format=json
+   $ docker run --rm --network=none --entrypoint dpkg-query \
+       hive/crate-operator:2.63.0-hive.1 -W
+
+Image tests use no network or Kubernetes credentials. They verify installed
+package behavior, non-root execution, license retention, provenance metadata
+and executable/module loading, not live reconciliation. The source includes
+``LICENSE`` and no separate NOTICE file. The image retains that license.
+
+Record the source revision, full staged patch/checksum, base digest, image ID,
+platform and package inventories with the build results. Apt/Python package
+indexes are still live; this records resolved inputs but does not guarantee
+bit-for-bit rebuilds. The local candidate is amd64 only. Before distribution,
+commit/review the build changes, rebuild from a clean source, use accurate
+``SOURCE_STATE=clean`` metadata and determine required deployment architectures,
+registry, scanning and promotion policy.
+
 Contributing
 ------------
 

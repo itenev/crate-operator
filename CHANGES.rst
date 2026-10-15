@@ -5,6 +5,9 @@ Changelog
 Unreleased
 ----------
 
+* Added optional image base, package version and source provenance build inputs
+  for local patched images, and retained the source license in the runtime image.
+
 * Local patch for upstream issue #918: added opt-in ``clusterip`` exposure for
   new database clusters, including Service recreation and suspend/start.
   Transitions to/from this mode and enabled Grand Central in this mode are
