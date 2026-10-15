@@ -87,6 +87,101 @@ commit/review the build changes, rebuild from a clean source, use accurate
 ``SOURCE_STATE=clean`` metadata and determine required deployment architectures,
 registry, scanning and promotion policy.
 
+For a clean committed build, stream a Git archive rather than the worktree
+directory. This excludes untracked downloads and local test artifacts. Set
+``SOURCE_REVISION`` to the reviewed commit, keep the pinned ``PYTHON_IMAGE``,
+and use a different tag so the dirty candidate remains identifiable:
+
+.. code-block:: console
+
+   $ export SOURCE_REVISION=$(git rev-parse HEAD)
+   $ set -o pipefail
+   $ git archive "$SOURCE_REVISION" | docker build --platform linux/amd64 \
+       --build-arg PYTHON_IMAGE="$PYTHON_IMAGE" \
+       --build-arg OPERATOR_VERSION=2.63.0+hive.1 \
+       --build-arg SOURCE_URL=https://github.com/itenev/crate-operator \
+       --build-arg SOURCE_REVISION="$SOURCE_REVISION" \
+       --build-arg SOURCE_STATE=clean \
+       -t hive/crate-operator:2.63.0-hive.1-clean -
+   $ CRATE_OPERATOR_TEST_IMAGE=hive/crate-operator:2.63.0-hive.1-clean \
+       CRATE_OPERATOR_TEST_SOURCE_STATE=clean \
+       CRATE_OPERATOR_TEST_REVISION="$SOURCE_REVISION" \
+       python -m pytest tests/test_local_image_build.py -q
+
+Clean builds must have an empty patch-checksum label. The image tests default
+to expecting dirty source and a hexadecimal SHA256 patch checksum; explicitly
+select ``clean`` for an archive build. ``CRATE_OPERATOR_TEST_REVISION`` checks
+the exact expected commit when supplied. These checks still do not prove
+Kubernetes reconciliation or authorize image publication.
+
+Local ClusterIP integration validation
+-------------------------------------
+
+``tests/test_clusterip_integration.py`` is deliberately destructive and opt-in.
+It targets only the prepared Docker-driver Minikube context
+``crate-clusterip`` and checks the node's Minikube profile label before writes.
+Use a separate kubeconfig, not a production context renamed to pass the check.
+
+Prepare Kubernetes 1.34 with 8 CPUs and 20 GiB RAM, a working StorageClass
+literally named ``default`` using ``k8s.io/minikube-hostpath``, and the patched
+CRD. Minikube's normally supplied class named ``standard`` is not sufficient
+for the upstream test defaults. Do not enable Traefik or a LoadBalancer tunnel
+for these internal-only lifecycle checks.
+
+Load the clean image into that profile and install the operator in namespace
+``crate-operator`` using that image with ``imagePullPolicy: Never``.
+Leave ``CRATEDB_OPERATOR_TESTING`` unset: the host-side test mode assumes
+external addressing. Set debug-volume size to ``2GiB`` and its class to
+``default``. Create namespace ``crate-validation`` and CrateDB
+``clusterip-smoke`` with the following spec:
+
+.. code-block:: yaml
+
+   cluster:
+     name: clusterip-smoke
+     imageRegistry: crate
+     version: "5.6.5"
+     exposure: clusterip
+   nodes:
+     data:
+       - name: hot
+         replicas: 1
+         resources:
+           requests: {cpu: 1, memory: 2Gi}
+           limits: {cpu: 2, memory: 4Gi}
+           heapRatio: 0.25
+           disk: {storageClass: default, size: 4GiB, count: 1}
+
+Wait for completed bootstrap before running:
+
+.. code-block:: console
+
+   $ CRATE_OPERATOR_TEST_CLUSTERIP=true python -m pytest \
+       tests/test_clusterip_integration.py \
+       --kube-config=/path/to/dedicated/kubeconfig \
+       --kube-context=crate-clusterip -q
+
+The checks query SQL from inside the operator Pod using its existing Secret,
+without printing credentials. They suspend/resume the smoke cluster (including
+client Service recreation), exercise a compute-triggered restart and create
+short-lived rejection fixtures. They change the smoke cluster's CPU limit
+between 2 and 3. Wait for an update's completed Kopf state before requesting
+the next edit, not merely for the Pod count to change. Kopf can remove
+permanent-error progress annotations: rejection checks use UID-scoped Events.
+
+These tests do not install their prerequisites or clean up the smoke cluster.
+After recording results, delete its CR while the operator is running and wait
+for garbage collection of its owned Pods and PVCs. Inspect and delete any
+remaining test PVCs before removing the test namespaces. Verify PV reclamation
+before stopping the dedicated profile. Never delete unrelated profiles or
+resources. Keep the clean-source image and command/package records identifiable.
+
+The broader upstream Kubernetes suite additionally needs external-address
+allocation/access, routing CRDs/controllers, expandable storage or external
+backup credentials depending on the test. Record exact selected and excluded
+cases; a local ClusterIP pass is not a claim that the entire suite ran or that
+AWS/OpenStack behavior has been verified.
+
 Contributing
 ------------
 

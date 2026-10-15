@@ -4,6 +4,7 @@
 
 import json
 import os
+import re
 import subprocess
 
 import pytest
@@ -91,9 +92,19 @@ def test_image_provenance_and_upstream_entrypoint():
     assert labels["org.opencontainers.image.source"] == (
         "https://github.com/itenev/crate-operator"
     )
-    assert len(labels["org.opencontainers.image.revision"]) == 40
-    assert len(labels["io.hive.source.patch-sha256"]) == 64
-    assert labels["io.hive.source.state"] == "dirty"
+    revision = labels["org.opencontainers.image.revision"]
+    assert re.fullmatch(r"[0-9a-f]{40}", revision)
+    expected_revision = os.environ.get("CRATE_OPERATOR_TEST_REVISION")
+    if expected_revision:
+        assert revision == expected_revision
+    source_state = os.environ.get("CRATE_OPERATOR_TEST_SOURCE_STATE", "dirty")
+    assert source_state in {"clean", "dirty"}
+    assert labels["io.hive.source.state"] == source_state
+    patch_sha256 = labels["io.hive.source.patch-sha256"]
+    if source_state == "dirty":
+        assert re.fullmatch(r"[0-9a-f]{64}", patch_sha256)
+    else:
+        assert patch_sha256 == ""
     assert labels["org.opencontainers.image.base.name"].startswith(
         "python:3.12-slim@sha256:"
     )

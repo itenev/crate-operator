@@ -5,6 +5,11 @@ Changelog
 Unreleased
 ----------
 
+* Added clean-source archive build instructions and image checks that distinguish
+  clean provenance from local patches and can verify an exact source revision.
+* Added opt-in isolated Minikube checks for ClusterIP bootstrap, SQL connectivity,
+  suspend/resume, compute restart and unsupported exposure configurations.
+
 * Added optional image base, package version and source provenance build inputs
   for local patched images, and retained the source license in the runtime image.
 
